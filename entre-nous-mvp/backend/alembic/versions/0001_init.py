@@ -3,6 +3,7 @@
 Revision ID: 0001_init
 Revises:
 Create Date: 2026-02-25
+
 """
 
 from alembic import op
@@ -16,6 +17,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # users
     op.create_table(
         "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -31,6 +33,7 @@ def upgrade() -> None:
     op.create_index("ix_users_created_at", "users", ["created_at"])
     op.create_index("ux_users_email_lookup_hmac", "users", ["email_lookup_hmac"], unique=True)
 
+    # ip bans (IP stored encrypted + lookup HMAC)
     op.create_table(
         "ip_bans",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -41,6 +44,23 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
 
+    # session events (IP encrypted, used for abuse control + metrics)
+    op.create_table(
+        "session_events",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("event_type", sa.String(length=32), nullable=False),
+        sa.Column("ip_lookup_hmac", sa.String(length=64), nullable=True),
+        sa.Column("ip_ciphertext", sa.LargeBinary(), nullable=True),
+        sa.Column("ip_nonce", sa.LargeBinary(), nullable=True),
+        sa.Column("user_agent", sa.String(length=300), nullable=True),
+        sa.Column("meta_json", sa.String(length=1000), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("ix_session_events_created_at", "session_events", ["created_at"])
+    op.create_index("ix_session_events_user_id", "session_events", ["user_id"])
+
+    # posts
     op.create_table(
         "posts",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -55,6 +75,7 @@ def upgrade() -> None:
     op.create_index("ix_posts_created_at", "posts", ["created_at"])
     op.create_index("ix_posts_author_id", "posts", ["author_id"])
 
+    # replies
     op.create_table(
         "replies",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -71,11 +92,12 @@ def upgrade() -> None:
     op.create_index("ix_replies_post_id", "replies", ["post_id"])
     op.create_index("ix_replies_created_at", "replies", ["created_at"])
 
+    # moderation flags and queue
     op.create_table(
         "moderation_flags",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("reporter_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("target_type", sa.String(length=16), nullable=False),
+        sa.Column("target_type", sa.String(length=16), nullable=False),  # post|reply|dm
         sa.Column("target_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("reason", sa.String(length=64), nullable=False),
         sa.Column("details", sa.String(length=500), nullable=True),
@@ -89,20 +111,74 @@ def upgrade() -> None:
         sa.Column("target_type", sa.String(length=16), nullable=False),
         sa.Column("target_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="5"),
-        sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
+        sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),  # pending|approved|rejected
         sa.Column("notes", sa.String(length=500), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_queue_status_priority", "moderation_queue", ["status", "priority", "created_at"])
 
+    # DM
+    op.create_table(
+        "conversations",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("last_message_at", sa.DateTime(timezone=True), nullable=True),
+    )
+
+    op.create_table(
+        "conversation_participants",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("conversation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("ix_conv_participants_conv", "conversation_participants", ["conversation_id"])
+    op.create_index("ix_conv_participants_user", "conversation_participants", ["user_id"])
+
+    op.create_table(
+        "dm_messages",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("conversation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("author_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("body_ciphertext", sa.LargeBinary(), nullable=False),
+        sa.Column("body_nonce", sa.LargeBinary(), nullable=False),
+        sa.Column("status", sa.String(length=16), nullable=False, server_default="visible"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+    )
+    op.create_index("ix_dm_messages_conv", "dm_messages", ["conversation_id"])
+    op.create_index("ix_dm_messages_created_at", "dm_messages", ["created_at"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_dm_messages_created_at", table_name="dm_messages")
+    op.drop_index("ix_dm_messages_conv", table_name="dm_messages")
+    op.drop_table("dm_messages")
+
+    op.drop_index("ix_conv_participants_user", table_name="conversation_participants")
+    op.drop_index("ix_conv_participants_conv", table_name="conversation_participants")
+    op.drop_table("conversation_participants")
+    op.drop_table("conversations")
+
+    op.drop_index("ix_queue_status_priority", table_name="moderation_queue")
     op.drop_table("moderation_queue")
+    op.drop_index("ix_flags_target", table_name="moderation_flags")
     op.drop_table("moderation_flags")
+
+    op.drop_index("ix_replies_created_at", table_name="replies")
+    op.drop_index("ix_replies_post_id", table_name="replies")
     op.drop_table("replies")
+
+    op.drop_index("ix_posts_author_id", table_name="posts")
+    op.drop_index("ix_posts_created_at", table_name="posts")
     op.drop_table("posts")
+
+    op.drop_index("ix_session_events_user_id", table_name="session_events")
+    op.drop_index("ix_session_events_created_at", table_name="session_events")
+    op.drop_table("session_events")
+
     op.drop_table("ip_bans")
+
     op.drop_index("ux_users_email_lookup_hmac", table_name="users")
     op.drop_index("ix_users_created_at", table_name="users")
     op.drop_table("users")

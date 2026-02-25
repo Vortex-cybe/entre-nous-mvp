@@ -1,1 +1,1 @@
-from .auth import router as auth
+from . import auth, posts, feed, moderation, gdpr, admin, dm
