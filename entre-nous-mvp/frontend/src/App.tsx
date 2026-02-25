@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-
-const API = "http://localhost:8000";
+const API = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
 
 type FeedItem = { post: { id: string; body: string; created_at: string; flags_count: number }, score: number };
 type Reply = { id: string; post_id: string; body: string; created_at: string; flags_count: number; kindness_votes: number };
