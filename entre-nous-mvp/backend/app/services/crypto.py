@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 import base64
+import hmac
+import hashlib
 from nacl.secret import SecretBox
 from nacl.utils import random as nacl_random
+
 from app.core.settings import settings
-import hmac, hashlib
+
 
 class ContentCrypto:
     def __init__(self) -> None:
@@ -21,27 +25,29 @@ class ContentCrypto:
         pt = self.box.decrypt(ciphertext, nonce)
         return pt.decode("utf-8")
 
-def _ip_prefix(self, ip: str) -> str:
-    # Privacy-friendly ban key: IPv4 /24 or IPv6 /64 prefix.
-    ip = (ip or "").strip()
-    if ":" in ip:  # IPv6
-        parts = ip.split(":")
-        return ":".join(parts[:4])  # rough /64
-    # IPv4
-    parts = ip.split(".")
-    if len(parts) == 4:
-        return ".".join(parts[:3])  # /24
-    return ip
+    def _ip_prefix(self, ip: str) -> str:
+        # Privacy-friendly ban key: IPv4 /24 or IPv6 /64 prefix.
+        ip = (ip or "").strip()
+        if not ip:
+            return ""
+        if ":" in ip:  # IPv6 (rough /64)
+            parts = ip.split(":")
+            return ":".join(parts[:4])
+        # IPv4 (/24)
+        parts = ip.split(".")
+        if len(parts) == 4:
+            return ".".join(parts[:3])
+        return ip
 
-def ip_lookup(self, ip: str) -> str:
-    prefix = self._ip_prefix(ip).encode("utf-8")
-    pepper = settings.ip_lookup_pepper.encode("utf-8")
-    return hmac.new(pepper, prefix, hashlib.sha256).hexdigest()
+    def ip_lookup(self, ip: str) -> str:
+        prefix = self._ip_prefix(ip).encode("utf-8")
+        pepper = settings.ip_lookup_pepper.encode("utf-8")
+        return hmac.new(pepper, prefix, hashlib.sha256).hexdigest()
 
     def email_lookup(self, email: str) -> str:
-        norm = email.strip().lower().encode("utf-8")
+        norm = (email or "").strip().lower().encode("utf-8")
         pepper = settings.email_lookup_pepper.encode("utf-8")
         return hmac.new(pepper, norm, hashlib.sha256).hexdigest()
 
-crypto = ContentCrypto()
 
+crypto = ContentCrypto()
