@@ -13,7 +13,6 @@ class LoginIn(BaseModel):
     password: str
 
 class TokenOut(BaseModel):
-(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
@@ -24,7 +23,7 @@ class ReplyCreateIn(BaseModel):
     body: str = Field(min_length=2, max_length=2000)
 
 class FlagIn(BaseModel):
-    target_type: Literal["post","reply"]
+    target_type: Literal["post", "reply"]
     target_id: UUID
     reason: str = Field(max_length=64)
     details: Optional[str] = Field(default=None, max_length=500)
