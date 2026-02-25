@@ -44,6 +44,5 @@ app.include_router(admin.router)
 app.include_router(dm.router)
 
 @app.get("/health")
-@limiter.limit("30/minute")
-async def health(request: Resquest):
+async def health():
     return {"ok": True}
